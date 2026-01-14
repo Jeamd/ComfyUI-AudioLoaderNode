@@ -57,7 +57,9 @@ class AudioLoaderFromURL:
             normalize: 是否归一化音频
             
         Returns:
-            audio: 音频波形数据, shape为(1, samples)的torch tensor
+            audio: 音频波形数据, shape为(samples, channels)的torch tensor
+                   - 单声道: (samples, 1)
+                   - 立体声: (samples, 2)
         """
         
         if not url or not url.strip():
@@ -153,7 +155,9 @@ class AudioLoaderFromURL:
             normalize: 是否归一化
             
         Returns:
-            waveform: 音频波形数据, shape为(1, samples)的torch tensor
+            waveform: 音频波形数据, shape为(samples, channels)的torch tensor
+                      - 单声道: (samples, 1)
+                      - 立体声: (samples, 2)
         """
         try:
             # 尝试使用librosa
@@ -170,16 +174,16 @@ class AudioLoaderFromURL:
             # 转换为torch tensor
             waveform = torch.from_numpy(audio).float()
             
-            # 如果是立体声,添加通道维度
+            # 转换为ComfyUI标准格式: (samples, channels)
             if channels == "stereo":
                 # librosa默认返回单声道,这里我们扩展为立体声
                 # 注意: 如果源文件是单声道,这里会复制两份
                 if waveform.ndim == 1:
-                    waveform = waveform.unsqueeze(0).repeat(2, 1)
+                    waveform = waveform.unsqueeze(1).repeat(1, 2)
             else:
-                # 单声道,添加batch维度
+                # 单声道,转换为(samples, 1)格式
                 if waveform.ndim == 1:
-                    waveform = waveform.unsqueeze(0)
+                    waveform = waveform.unsqueeze(1)
             
             # 归一化
             if normalize:
@@ -200,24 +204,24 @@ class AudioLoaderFromURL:
                 # 转换为torch tensor
                 waveform = torch.from_numpy(audio).float()
                 
-                # 处理声道
-                if waveform.ndim == 1:
-                    # 单声道
-                    if channels == "stereo":
-                        waveform = waveform.unsqueeze(0).repeat(2, 1)
-                    else:
-                        waveform = waveform.unsqueeze(0)
-                elif waveform.ndim == 2:
-                    # 多声道
-                    if waveform.shape[1] == 2:
-                        waveform = waveform.T  # 转换为(2, samples)
-                        if channels == "mono":
-                            waveform = waveform.mean(dim=0, keepdim=True)
-                    else:
-                        # 超过2声道,取前2个
-                        waveform = waveform[:2].T
-                        if channels == "mono":
-                            waveform = waveform.mean(dim=0, keepdim=True)
+                # 处理声道并转换为ComfyUI标准格式: (samples, channels)
+            if waveform.ndim == 1:
+                # 单声道 -> (samples, 1)
+                if channels == "stereo":
+                    waveform = waveform.unsqueeze(1).repeat(1, 2)
+                else:
+                    waveform = waveform.unsqueeze(1)
+            elif waveform.ndim == 2:
+                # 多声道
+                if waveform.shape[1] == 2:
+                    # 已经是(samples, 2)格式,只需要根据需求调整
+                    if channels == "mono":
+                        waveform = waveform.mean(dim=1, keepdim=True)
+                else:
+                    # 超过2声道,取前2个并转置为(samples, 2)
+                    waveform = waveform[:, :2]
+                    if channels == "mono":
+                        waveform = waveform.mean(dim=1, keepdim=True)
                 
                 # 重采样(如果需要)
                 if sr != sample_rate:
@@ -260,13 +264,13 @@ class AudioLoaderFromURL:
                     # 归一化到[-1, 1]
                     audio_np = audio_np / (2**15)
                     
-                    # 转换为torch tensor
+                    # 转换为torch tensor并转为ComfyUI格式: (samples, channels)
                     waveform = torch.from_numpy(audio_np).float()
                     
                     if audio.channels == 2:
-                        waveform = waveform.reshape(2, -1)
+                        waveform = waveform.reshape(-1, 2)
                     else:
-                        waveform = waveform.unsqueeze(0)
+                        waveform = waveform.reshape(-1, 1)
                     
                     return waveform
                     
@@ -301,7 +305,9 @@ class AudioInfoExtractor:
         提取音频信息
         
         Args:
-            audio: 音频波形数据, shape为(1, samples)或(2, samples)
+            audio: 音频波形数据, shape为(samples, channels)
+                   - 单声道: (samples, 1)
+                   - 立体声: (samples, 2)
             
         Returns:
             duration: 音频时长(秒)
@@ -310,14 +316,17 @@ class AudioInfoExtractor:
             info: 格式化的信息字符串
         """
         if audio.ndim == 2:
-            channels_count = audio.shape[0]
-            samples = audio.shape[1]
-        elif audio.ndim == 1:
-            channels_count = 1
+            # ComfyUI标准格式: (samples, channels)
             samples = audio.shape[0]
-        else:
+            channels_count = audio.shape[1]
+        elif audio.ndim == 1:
+            # 兼容旧格式: (samples,)
+            samples = audio.shape[0]
             channels_count = 1
-            samples = audio.shape[-1]
+        else:
+            # 其他维度,取最后两个维度
+            samples = audio.shape[-2]
+            channels_count = audio.shape[-1]
         
         # 默认采样率(因为我们没有存储采样率信息)
         default_sample_rate = 22050
