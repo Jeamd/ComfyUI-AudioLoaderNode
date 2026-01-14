@@ -205,38 +205,40 @@ class AudioLoaderFromURL:
                 waveform = torch.from_numpy(audio).float()
                 
                 # 处理声道并转换为ComfyUI标准格式: (samples, channels)
-            if waveform.ndim == 1:
-                # 单声道 -> (samples, 1)
-                if channels == "stereo":
-                    waveform = waveform.unsqueeze(1).repeat(1, 2)
-                else:
-                    waveform = waveform.unsqueeze(1)
-            elif waveform.ndim == 2:
-                # 多声道
-                if waveform.shape[1] == 2:
-                    # 已经是(samples, 2)格式,只需要根据需求调整
-                    if channels == "mono":
-                        waveform = waveform.mean(dim=1, keepdim=True)
-                else:
-                    # 超过2声道,取前2个并转置为(samples, 2)
-                    waveform = waveform[:, :2]
-                    if channels == "mono":
-                        waveform = waveform.mean(dim=1, keepdim=True)
-                
-                # 重采样(如果需要)
-                if sr != sample_rate:
-                    from scipy import signal
-                    num_samples = int(waveform.shape[-1] * sample_rate / sr)
-                    waveform = torch.from_numpy(
-                        signal.resample(waveform.numpy(), num_samples)
-                    ).float()
-                
-                # 归一化
-                if normalize:
-                    max_val = torch.abs(waveform).max()
-                    if max_val > 0:
-                        waveform = waveform / max_val
-                
+                if waveform.ndim == 1:
+                    # 单声道 -> (samples, 1)
+                    if channels == "stereo":
+                        waveform = waveform.unsqueeze(1).repeat(1, 2)
+                    else:
+                        waveform = waveform.unsqueeze(1)
+                elif waveform.ndim == 2:
+                    # 多声道
+                    if waveform.shape[1] == 2:
+                        # 已经是(samples, 2)格式,只需要根据需求调整
+                        if channels == "mono":
+                            waveform = waveform.mean(dim=1, keepdim=True)
+                    else:
+                        # 超过2声道,取前2个并转置为(samples, 2)
+                        waveform = waveform[:, :2]
+                        if channels == "mono":
+                            waveform = waveform.mean(dim=1, keepdim=True)
+                    
+                    # 重采样(如果需要)
+                    if sr != sample_rate:
+                        from scipy import signal
+                        num_samples = int(waveform.shape[-1] * sample_rate / sr)
+                        waveform = torch.from_numpy(
+                            signal.resample(waveform.numpy(), num_samples)
+                        ).float()
+                    
+                    # 归一化
+                    if normalize:
+                        max_val = torch.abs(waveform).max()
+                        if max_val > 0:
+                            waveform = waveform / max_val
+                    
+                    return waveform
+                    
                 return waveform
                 
             except ImportError:
